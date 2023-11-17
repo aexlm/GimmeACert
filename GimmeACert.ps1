@@ -1,6 +1,6 @@
 ﻿<#PSScriptInfo
 
-    .VERSION 1.3
+    .VERSION 2.0.1
 
     .AUTHOR axel.mauchand@metsys.fr
 
@@ -341,43 +341,10 @@ if (-not (Get-Module -Name "PKIMAN")) {
 }
 
 if ($UseCSR) {
-    $OpenDialog = [System.Windows.Forms.OpenFileDialog]@{
-        InitialDirectory = $PublicDepositPath
-        Filter = "CSR (*.csr;*.req)|*.csr;*.req|All files (*.*)|*.*"
-    }
-    if ($OpenDialog.ShowDialog() -eq 'OK') {
-        $CSRFileName = $OpenDialog.FileName
-    } else {
-        Write-Host -ForegroundColor Yellow "Aucune requête sélectionnée, fermeture du programme."        
-        return
-    }
-
-    $CSRDump = C:\Windows\System32\certutil.exe -unicode -dump $CSRFileName
-    
-    $Object = (([Regex]::Match($CSRDump,"$global:CSRObject(.*?)$global:CSRHash").Groups[1].Value) -Replace "^\s{5}") -Split "\s{2,}"
-    Write-Host -ForegroundColor Green "Objet du CSR indiqué :`n"
-    foreach ($FObj in $Object) {
-        Write-Host "  $FObj"
-    }
-
-    Write-Host ""
-
-    $ObjectName = ((($Object -Split "\n") -Match "CN=") -Split "=")[-1]
-    
-    if ($CSRDump -match "2.5.29.17") {        
-        $Groups = [Regex]::Match($CSRDump,"$global:CSRSAN(.*?)([a-zA-Z0-9])\s{2,8}[a-zA-Z0-9]").Groups
-        $RawSAN = (($Groups[1].Value + $Groups[2].Value) -Replace "^\s+") -Split "\s{2,}"
-
-        if ($RawSAN) {
-            Write-Host -ForegroundColor Green "SAN renseignés dans le CSR :`n"
-            foreach ($FSan in $RawSAN) {
-                Write-Host "  $FSan"
-            }            
-        } else {
-            Write-Host -ForegroundColor Yellow "SAN renseignés dans le CSR mais illisibles."
-        }        
-    } else {
-        Write-Host -ForegroundColor Yellow "Aucun SAN renseigné dans le CSR."
+    $ObjectName, $CSRFileName = Select-Csr -Path $CSRFileName -InitialDirectory $PublicDepositPath
+    if (-not $ObjectName) { return }
+    if (-not $PublicDepositPath) {
+        $PublicDepositPath = ($CSRFileName -split '\\',-2)[0]
     }
 
     $Validation = Read-Host "`nValidation de la requête ? (Y/N)"
@@ -400,19 +367,20 @@ if ($UseCSR) {
 try {
     if (-not $ObjectName) {
         if ($Thumbprint) {
-            $ShortStore = ($CertStore -split '\\')[-1]
-            if ($Store -match "CurrentUser") {
-                $CertDump = C:\Windows\System32\certutil.exe -unicode -user -store $ShortStore $Thumbprint
-            } else {
-                $CertDump = C:\Windows\System32\certutil.exe -unicode -store $ShortStore $CertObject.Thumbprint
+            try {
+                $Certificate = Get-ChildItem "$Store\$CertificateThumbprint" -ErrorAction Stop
+            } catch [System.Management.Automation.ItemNotFoundException] {
+                Write-Host -ForegroundColor Yellow "Le chemin spécifié pour le certificat n'existe pas."
+                return
             }
-            $ObjectName = (($CertDump -match "Subject") -split "CN=")[-1]
 
-            #Reconstruction du nom du sujet à partir de certutil.exe et modification de la variable WorkingDirectory
+            $ObjectName = (((($Certificate.Subject) -split "\s") -match "CN=") -split '=')[-1] -replace ",$"
+
+            #Reconstruction du nom du sujet à partir du magasin et modification de la variable WorkingDirectory
             $WorkingDirectory += $ObjectName
         }
         
-        #Si le répertoire de travail fini toujours par le caractère '\', on le supprime
+        #Si le répertoire de travail finit toujours par le caractère '\', on le supprime
         if ($WorkingDirectory[-1] -eq '\') {
             $WorkingDirectory = $WorkingDirectory -replace ".$"
         }                        
@@ -474,6 +442,7 @@ while ($Step -ne 4) {
         }
         2 {
             $TargetCA = New-CER -CSRFile $CSRFilePath -TargetCA $TargetCA -CertificateTemplate $CertificateTemplate -CERFile $CERFilePath -RequestID $RequestID -UseMachine $InstallMachine
+            if (-not $TargetCA) { return }
         }
         3 {
             if (-not $NoCertInstall) {
