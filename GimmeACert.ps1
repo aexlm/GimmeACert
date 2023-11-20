@@ -333,11 +333,25 @@ param (
 )
 
 if (-not (Get-Module -Name "PKIMAN")) {
-    Import-Module "PKIMAN"
-
+    try {
+        Import-Module "PKIMAN" -ErrorAction Stop
+    } catch [System.IO.IOException] {
+        Write-Host -ForegroundColor Red "Module PKIMAN non installé ou introuvable.`nFermeture du programme..."
+        return
+    }  catch {
+        Write-Host -ForegroundColor Red "Erreur du chargement du module PKIMAN.`n$_`nFermeture du programme..."
+        return
+    }    
     Write-Host "Module PKIMAN importé."
 } else {
     Write-Host "Module PKIMAN déjà importé."
+}
+
+try {
+    . "$PSScriptRoot`\Functions\Import-GimmeACertFunctions.ps1"
+} catch {
+    Write-Host -ForegroundColor Red "Fonctions non trouvées.`n$_`nFermeture du programme..."
+    return
 }
 
 if ($UseCSR) {
