@@ -308,7 +308,7 @@ param (
     $TargetCA,
 
     [String]
-    $WorkingDirectory = "C:\Temp\Certificats\$ObjectName",
+    $WorkingDirectory,
 
     [String]
     $PolicyFileName = "$ObjectName`Policy.inf",
@@ -389,16 +389,16 @@ try {
             }
 
             $ObjectName = (((($Certificate.Subject) -split "\s") -match "CN=") -split '=')[-1] -replace ",$"
-
-            #Reconstruction du nom du sujet à partir du magasin et modification de la variable WorkingDirectory
-            $WorkingDirectory += $ObjectName
-        }
-        
-        #Si le répertoire de travail finit toujours par le caractère '\', on le supprime
-        if ($WorkingDirectory[-1] -eq '\') {
-            $WorkingDirectory = $WorkingDirectory -replace ".$"
-        }                        
+        }                              
     }    
+
+    $WorkingDirectory = "C:\Temp\Certificats\$ObjectName"
+        
+    #Si le répertoire de travail finit toujours par le caractère '\', on le supprime
+    if ($WorkingDirectory[-1] -eq '\') {
+        $WorkingDirectory = $WorkingDirectory -replace ".$"
+    }  
+
     New-Item -ItemType "directory" -Path $WorkingDirectory -ErrorAction Stop > $null
     Write-Host "Dossier $WorkingDirectory créé."
 } catch [System.UnauthorizedAccessException] {
@@ -409,6 +409,11 @@ try {
 } catch {
     Write-Host -ForegroundColor Red $_
     exit
+}
+
+#Copie en local du CSR dans le répertoire de travail
+if ($UseCSR) {
+    Copy-Item -Path $CSRFileName -Destination $WorkingDirectory    
 }
 
 #Construction des chemins des fichiers à l'aide de la fonction Get-FilePath
@@ -466,8 +471,12 @@ while ($Step -ne 4) {
     }
 }
 
-if ($UsePublicDeposit) {
-    Copy-Item -Path $CERFilePath -Destination "$PublicDepositPath\$CERFileName"
+if ($UsePublicDeposit -and ($PublicDepositPath -ne $WorkingDirectory)) {
+    $CopyDeposit = Read-Host "Copier le certificat dans le répertoire contenant le CSR ? (Y/N)"
+    if ($CopyDeposit.ToLower() -eq 'y') {
+        Copy-Item -Path $CERFilePath -Destination "$PublicDepositPath\$CERFileName"
+        Write-Host "Certificat disponible à l'emplacement $PublicDepositPath\$CERFileName"
+    }    
 }
 
 if (-not $NoCertInstall) {
@@ -528,5 +537,6 @@ if ($DeleteWorkingDirectory) {
     } catch {
         Write-Host -ForegroundColor Red "Erreur lors de la suppression du répertoire.`n$_"        
     }
-
 }
+
+return
