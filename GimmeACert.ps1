@@ -413,7 +413,7 @@ try {
 
 #Copie en local du CSR dans le répertoire de travail
 if ($UseCSR) {
-    Copy-Item -Path $CSRFileName -Destination $WorkingDirectory    
+    Copy-Item -Path $CSRFileName -Destination $WorkingDirectory -ErrorAction SilentlyContinue
 }
 
 #Construction des chemins des fichiers à l'aide de la fonction Get-FilePath
@@ -466,6 +466,9 @@ while ($Step -ne 4) {
         3 {
             if (-not $NoCertInstall) {
                 $Thumbprint = Install-Cert -CERFile $CERFilePath -Store $CertStore
+            } else {
+                $RetrievedCertificate = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 $CERFilePath
+                $Thumbprint = $RetrievedCertificate.Thumbprint
             }
         }
     }
