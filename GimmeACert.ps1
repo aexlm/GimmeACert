@@ -1,6 +1,6 @@
 ﻿<#PSScriptInfo
 
-    .VERSION 2.0.1
+    .VERSION 3.0.0
 
     .AUTHOR axel.mauchand@metsys.fr
 
@@ -311,22 +311,22 @@ param (
     $WorkingDirectory,
 
     [String]
-    $PolicyFileName = "$ObjectName`Policy.inf",
+    $PolicyFileName,
 
     [String]
-    $CSRFileName = "$ObjectName`Request.req",
+    $CSRFileName,
 
     [String]
-    $CERFileName = "$ObjectName`Certificate.cer",
+    $CERFileName,
 
     [String]
-    $PrivateKeyFileName = "$ObjectName`PKey.key",
+    $PrivateKeyFileName,
 
     [String]
-    $PEMFileName = "$ObjectName`Certificate.pem",
+    $PEMFileName,
 
     [String]
-    $PFXFileName = "$ObjectName`Certificate.pfx",
+    $PFXFileName,
 
     [String]
     $CertStore = "Cert:\CurrentUser\My"
@@ -358,7 +358,7 @@ if ($UseCSR) {
     $ObjectName, $CSRFileName = Select-Csr -Path $CSRFileName -InitialDirectory $PublicDepositPath
     if (-not $ObjectName) { return }
     if (-not $PublicDepositPath) {
-        $PublicDepositPath = ($CSRFileName -split '\\',-2)[0]
+        $PublicDepositPath = Split-Path -Parent -Path $CSRFileName
     }
 
     $Validation = Read-Host "`nValidation de la requête ? (Y/N)"
@@ -372,7 +372,7 @@ if ($UseCSR) {
             return
         }
     } else {
-        $NoCertInstall, $UsePublicDeposit = $True
+        $NoCertInstall, $UsePublicDeposit = $True, $True
     }
     
 }
@@ -392,7 +392,9 @@ try {
         }                              
     }    
 
-    $WorkingDirectory = "C:\Temp\Certificats\$ObjectName"
+    if (-not $WorkingDirectory) {
+        $WorkingDirectory = "C:\Temp\Certificats\$ObjectName"
+    }    
         
     #Si le répertoire de travail finit toujours par le caractère '\', on le supprime
     if ($WorkingDirectory[-1] -eq '\') {
@@ -409,6 +411,26 @@ try {
 } catch {
     Write-Host -ForegroundColor Red $_
     exit
+}
+
+#Construction du nom des fichiers s'ils n'ont pas été donné
+if (-not $CERFileName) {
+    $CERFileName = "$ObjectName`Certificate.cer"
+}
+if (-not $CSRFileName) {
+    $CSRFileName = "$ObjectName`Request.req"
+}
+if (-not $PolicyFileName) {
+    $PolicyFileName = "$ObjectName`Policy.inf"
+}
+if (-not $PrivateKeyFileName) {
+    $PrivateKeyFileName = "$ObjectName`PKey.key"
+}
+if (-not $PEMFileName) {
+    $PEMFileName = "$ObjectName`Certificate.pem"
+}
+if (-not $PFXFileName) {
+    $PFXFileName = "$ObjectName`Certificate.pfx"
 }
 
 #Copie en local du CSR dans le répertoire de travail
