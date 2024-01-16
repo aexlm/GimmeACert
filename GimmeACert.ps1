@@ -1,6 +1,6 @@
 ﻿<#PSScriptInfo
 
-    .VERSION 1.3
+    .VERSION 3.0.0
 
     .AUTHOR axel.mauchand@metsys.fr
 
@@ -308,76 +308,57 @@ param (
     $TargetCA,
 
     [String]
-    $WorkingDirectory = "C:\Temp\Certificats\$ObjectName",
+    $WorkingDirectory,
 
     [String]
-    $PolicyFileName = "$ObjectName`Policy.inf",
+    $PolicyFileName,
 
     [String]
-    $CSRFileName = "$ObjectName`Request.req",
+    $CSRFileName,
 
     [String]
-    $CERFileName = "$ObjectName`Certificate.cer",
+    $CERFileName,
 
     [String]
-    $PrivateKeyFileName = "$ObjectName`PKey.key",
+    $PrivateKeyFileName,
 
     [String]
-    $PEMFileName = "$ObjectName`Certificate.pem",
+    $PEMFileName,
 
     [String]
-    $PFXFileName = "$ObjectName`Certificate.pfx",
+    $PFXFileName,
 
     [String]
     $CertStore = "Cert:\CurrentUser\My"
 )
 
 if (-not (Get-Module -Name "PKIMAN")) {
-    Import-Module "PKIMAN"
-
+    try {
+        Import-Module "PKIMAN" -ErrorAction Stop
+    } catch [System.IO.IOException] {
+        Write-Host -ForegroundColor Red "Module PKIMAN non installé ou introuvable.`nFermeture du programme..."
+        return
+    }  catch {
+        Write-Host -ForegroundColor Red "Erreur du chargement du module PKIMAN.`n$_`nFermeture du programme..."
+        return
+    }    
     Write-Host "Module PKIMAN importé."
 } else {
     Write-Host "Module PKIMAN déjà importé."
 }
 
+try {
+    @("Clear-WorkingDirectory.ps1", "Export-Results.ps1","Get-FilePath.ps1","Get-Step.ps1") | ForEach-Object { . "$PSScriptRoot`\Functions\$_" }
+} catch {
+    Write-Host -ForegroundColor Red "Fonctions non trouvées.`n$_`nFermeture du programme..."
+    return
+}
+
 if ($UseCSR) {
-    $OpenDialog = [System.Windows.Forms.OpenFileDialog]@{
-        InitialDirectory = $PublicDepositPath
-        Filter = "CSR (*.csr;*.req)|*.csr;*.req|All files (*.*)|*.*"
-    }
-    if ($OpenDialog.ShowDialog() -eq 'OK') {
-        $CSRFileName = $OpenDialog.FileName
-    } else {
-        Write-Host -ForegroundColor Yellow "Aucune requête sélectionnée, fermeture du programme."        
-        return
-    }
-
-    $CSRDump = C:\Windows\System32\certutil.exe -unicode -dump $CSRFileName
-    
-    $Object = (([Regex]::Match($CSRDump,"$global:CSRObject(.*?)$global:CSRHash").Groups[1].Value) -Replace "^\s{5}") -Split "\s{2,}"
-    Write-Host -ForegroundColor Green "Objet du CSR indiqué :`n"
-    foreach ($FObj in $Object) {
-        Write-Host "  $FObj"
-    }
-
-    Write-Host ""
-
-    $ObjectName = ((($Object -Split "\n") -Match "CN=") -Split "=")[-1]
-    
-    if ($CSRDump -match "2.5.29.17") {        
-        $Groups = [Regex]::Match($CSRDump,"$global:CSRSAN(.*?)([a-zA-Z0-9])\s{2,8}[a-zA-Z0-9]").Groups
-        $RawSAN = (($Groups[1].Value + $Groups[2].Value) -Replace "^\s+") -Split "\s{2,}"
-
-        if ($RawSAN) {
-            Write-Host -ForegroundColor Green "SAN renseignés dans le CSR :`n"
-            foreach ($FSan in $RawSAN) {
-                Write-Host "  $FSan"
-            }            
-        } else {
-            Write-Host -ForegroundColor Yellow "SAN renseignés dans le CSR mais illisibles."
-        }        
-    } else {
-        Write-Host -ForegroundColor Yellow "Aucun SAN renseigné dans le CSR."
+    $ObjectName, $CSRFileName = Select-Csr -Path $CSRFileName -InitialDirectory $PublicDepositPath
+    if (-not $ObjectName) { return }
+    if (-not $PublicDepositPath) {
+        $PublicDepositPath = Split-Path -Parent -Path $CSRFileName
     }
 
     $Validation = Read-Host "`nValidation de la requête ? (Y/N)"
@@ -391,7 +372,7 @@ if ($UseCSR) {
             return
         }
     } else {
-        $NoCertInstall, $UsePublicDeposit = $True
+        $NoCertInstall, $UsePublicDeposit = $True, $True
     }
     
 }
@@ -400,23 +381,26 @@ if ($UseCSR) {
 try {
     if (-not $ObjectName) {
         if ($Thumbprint) {
-            $ShortStore = ($CertStore -split '\\')[-1]
-            if ($Store -match "CurrentUser") {
-                $CertDump = C:\Windows\System32\certutil.exe -unicode -user -store $ShortStore $Thumbprint
-            } else {
-                $CertDump = C:\Windows\System32\certutil.exe -unicode -store $ShortStore $CertObject.Thumbprint
+            try {
+                $Certificate = Get-ChildItem "$Store\$CertificateThumbprint" -ErrorAction Stop
+            } catch [System.Management.Automation.ItemNotFoundException] {
+                Write-Host -ForegroundColor Yellow "Le chemin spécifié pour le certificat n'existe pas."
+                return
             }
-            $ObjectName = (($CertDump -match "Subject") -split "CN=")[-1]
 
-            #Reconstruction du nom du sujet à partir de certutil.exe et modification de la variable WorkingDirectory
-            $WorkingDirectory += $ObjectName
-        }
-        
-        #Si le répertoire de travail fini toujours par le caractère '\', on le supprime
-        if ($WorkingDirectory[-1] -eq '\') {
-            $WorkingDirectory = $WorkingDirectory -replace ".$"
-        }                        
+            $ObjectName = (((($Certificate.Subject) -split "\s") -match "CN=") -split '=')[-1] -replace ",$"
+        }                              
     }    
+
+    if (-not $WorkingDirectory) {
+        $WorkingDirectory = "C:\Temp\Certificats\$ObjectName"
+    }    
+        
+    #Si le répertoire de travail finit toujours par le caractère '\', on le supprime
+    if ($WorkingDirectory[-1] -eq '\') {
+        $WorkingDirectory = $WorkingDirectory -replace ".$"
+    }  
+
     New-Item -ItemType "directory" -Path $WorkingDirectory -ErrorAction Stop > $null
     Write-Host "Dossier $WorkingDirectory créé."
 } catch [System.UnauthorizedAccessException] {
@@ -427,6 +411,31 @@ try {
 } catch {
     Write-Host -ForegroundColor Red $_
     exit
+}
+
+#Construction du nom des fichiers s'ils n'ont pas été donné
+if (-not $CERFileName) {
+    $CERFileName = "$ObjectName`Certificate.cer"
+}
+if (-not $CSRFileName) {
+    $CSRFileName = "$ObjectName`Request.req"
+}
+if (-not $PolicyFileName) {
+    $PolicyFileName = "$ObjectName`Policy.inf"
+}
+if (-not $PrivateKeyFileName) {
+    $PrivateKeyFileName = "$ObjectName`PKey.key"
+}
+if (-not $PEMFileName) {
+    $PEMFileName = "$ObjectName`Certificate.pem"
+}
+if (-not $PFXFileName) {
+    $PFXFileName = "$ObjectName`Certificate.pfx"
+}
+
+#Copie en local du CSR dans le répertoire de travail
+if ($UseCSR) {
+    Copy-Item -Path $CSRFileName -Destination $WorkingDirectory -ErrorAction SilentlyContinue
 }
 
 #Construction des chemins des fichiers à l'aide de la fonction Get-FilePath
@@ -474,17 +483,25 @@ while ($Step -ne 4) {
         }
         2 {
             $TargetCA = New-CER -CSRFile $CSRFilePath -TargetCA $TargetCA -CertificateTemplate $CertificateTemplate -CERFile $CERFilePath -RequestID $RequestID -UseMachine $InstallMachine
+            if (-not $TargetCA) { return }
         }
         3 {
             if (-not $NoCertInstall) {
                 $Thumbprint = Install-Cert -CERFile $CERFilePath -Store $CertStore
+            } else {
+                $RetrievedCertificate = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2 $CERFilePath
+                $Thumbprint = $RetrievedCertificate.Thumbprint
             }
         }
     }
 }
 
-if ($UsePublicDeposit) {
-    Copy-Item -Path $CERFilePath -Destination "$PublicDepositPath\$CERFileName"
+if ($UsePublicDeposit -and ($PublicDepositPath -ne $WorkingDirectory)) {
+    $CopyDeposit = Read-Host "Copier le certificat dans le répertoire contenant le CSR ? (Y/N)"
+    if ($CopyDeposit.ToLower() -eq 'y') {
+        Copy-Item -Path $CERFilePath -Destination "$PublicDepositPath\$CERFileName"
+        Write-Host "Certificat disponible à l'emplacement $PublicDepositPath\$CERFileName"
+    }    
 }
 
 if (-not $NoCertInstall) {
@@ -545,5 +562,6 @@ if ($DeleteWorkingDirectory) {
     } catch {
         Write-Host -ForegroundColor Red "Erreur lors de la suppression du répertoire.`n$_"        
     }
-
 }
+
+return
